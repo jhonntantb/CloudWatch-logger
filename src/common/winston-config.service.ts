@@ -5,7 +5,8 @@ import {
   WinstonModuleOptions,
   WinstonModuleOptionsFactory,
 } from 'nest-winston';
-import WinstonCloudwatch from 'winston-cloudwatch';
+import * as WinstonCloudwatch from 'winston-cloudwatch';
+
 import { LEVEL_LOGS } from './const/level-logs';
 
 @Injectable()
@@ -29,6 +30,10 @@ export class WinstonConfigService implements WinstonModuleOptionsFactory {
         logGroupName,
         logStreamName,
       ),
+      rejectionHandlers: this.obtainCloudWatchRejectionTransport(
+        logGroupName,
+        logStreamName,
+      ),
     };
   }
 
@@ -49,25 +54,36 @@ export class WinstonConfigService implements WinstonModuleOptionsFactory {
           awsAccessKeyId: this.configService.get<string>('AWS_ACCESS_KEY_ID'),
           awsSecretKey: this.configService.get<string>('AWS_SECRET_ACCESS_KEY'),
           level: 'error',
+          jsonMessage: true,
           messageFormatter: (logObject) => JSON.stringify(logObject),
         }),
         new WinstonCloudwatch({
           logGroupName: logGroupName,
-          logStreamName: `timeRes-${logStreamName.split('-')[1]}`,
+          logStreamName: `info-${logStreamName}`,
           awsRegion: this.configService.get<string>('AWS_REGION'),
           awsAccessKeyId: this.configService.get<string>('AWS_ACCESS_KEY_ID'),
           awsSecretKey: this.configService.get<string>('AWS_SECRET_ACCESS_KEY'),
           level: 'info',
+          jsonMessage: true,
           messageFormatter: (logObject) => JSON.stringify(logObject),
         }),
         new WinstonCloudwatch({
           logGroupName: logGroupName,
-          logStreamName: `audit-${logStreamName.split('-')[1]}`,
+          logStreamName: `debug-${logStreamName}`,
           awsRegion: this.configService.get<string>('AWS_REGION'),
           awsAccessKeyId: this.configService.get<string>('AWS_ACCESS_KEY_ID'),
           awsSecretKey: this.configService.get<string>('AWS_SECRET_ACCESS_KEY'),
           level: 'debug',
-          messageFormatter: (logObject) => JSON.stringify(logObject),
+          jsonMessage: true,
+          messageFormatter: (logObject) => {
+            return JSON.stringify({
+              timestamp: logObject.timestamp,
+              level: logObject.level,
+              message: logObject.message,
+              path: logObject.path,
+              statusCode: logObject.statusCode,
+            });
+          },
         }),
       ];
     }
@@ -88,7 +104,7 @@ export class WinstonConfigService implements WinstonModuleOptionsFactory {
       exceptionTransportList = [
         new WinstonCloudwatch({
           logGroupName: logGroupName,
-          logStreamName: logStreamName,
+          logStreamName: `exception-${logStreamName}`,
           awsRegion: this.configService.get<string>('AWS_REGION'),
           awsAccessKeyId: this.configService.get<string>('AWS_ACCESS_KEY_ID'),
           awsSecretKey: this.configService.get<string>('AWS_SECRET_ACCESS_KEY'),
@@ -98,5 +114,30 @@ export class WinstonConfigService implements WinstonModuleOptionsFactory {
       ];
     }
     return exceptionTransportList;
+  }
+  private obtainCloudWatchRejectionTransport(
+    logGroupName: string,
+    logStreamName: string,
+  ) {
+    let rejectionTransportList;
+
+    if (process.env.APP_ENV === 'development') {
+      rejectionTransportList = [
+        new transports.File({ filename: logStreamName }),
+      ];
+    } else {
+      rejectionTransportList = [
+        new WinstonCloudwatch({
+          logGroupName: logGroupName,
+          logStreamName: `rejection-${logStreamName}`,
+          awsRegion: this.configService.get<string>('AWS_REGION'),
+          awsAccessKeyId: this.configService.get<string>('AWS_ACCESS_KEY_ID'),
+          awsSecretKey: this.configService.get<string>('AWS_SECRET_ACCESS_KEY'),
+          jsonMessage: true,
+          messageFormatter: (logObject) => JSON.stringify(logObject),
+        }),
+      ];
+    }
+    return rejectionTransportList;
   }
 }
